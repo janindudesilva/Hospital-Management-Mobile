@@ -69,7 +69,8 @@ export const registerUser = async (payload) => {
       dateOfBirth: payload.dateOfBirth,
       age: age,
       gender: payload.gender?.toLowerCase(),
-      address: payload.address
+      address: payload.address,
+      nicPassport: payload.nicPassport
     });
   } else if (user.role === 'doctor') {
     await Doctor.create({

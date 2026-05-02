@@ -23,24 +23,83 @@ export const getProfile = asyncHandler(async (req, res) => {
 });
 
 export const getAllUsers = asyncHandler(async (req, res) => {
-  const users = await User.find().select('-password');
+  const users = await User.find().select('-password').lean();
+  
+  const usersWithProfiles = await Promise.all(users.map(async (user) => {
+    let profile = null;
+    if (user.role === 'patient') {
+      profile = await Patient.findOne({ user: user._id }).lean();
+    } else if (user.role === 'doctor') {
+      profile = await Doctor.findOne({ user: user._id }).lean();
+    }
+    return { ...user, ...(profile || {}) };
+  }));
+
   res.status(200).json({
     success: true,
-    data: users
+    data: usersWithProfiles
   });
 });
 
 export const updateUser = asyncHandler(async (req, res) => {
-  const user = await User.findByIdAndUpdate(req.params.id, req.body, {
-    new: true,
-    runValidators: true
-  }).select('-password');
-
+  const { fullName, email, phone, profile = {} } = req.body;
+  
+  const user = await User.findById(req.params.id);
   if (!user) {
     return res.status(404).json({ success: false, message: 'User not found' });
   }
 
-  res.status(200).json({ success: true, message: 'User updated', data: user });
+  // Update User fields
+  if (fullName) user.fullName = fullName;
+  if (email) user.email = email;
+  if (phone) user.phone = phone;
+  
+  await user.save();
+
+  // Update Profile fields
+  if (user.role === 'patient') {
+    const patient = await Patient.findOne({ user: user._id });
+    if (patient) {
+      const allowedPatientFields = [
+        'nicPassport', 'age', 'gender', 'address', 'bloodGroup', 
+        'dateOfBirth', 'emergencyContact', 'medicalHistory'
+      ];
+      
+      for (const key of allowedPatientFields) {
+        if (profile[key] !== undefined || req.body[key] !== undefined) {
+          patient[key] = profile[key] ?? req.body[key];
+        }
+      }
+      patient.fullName = user.fullName;
+      patient.phone = user.phone;
+      await patient.save();
+    }
+  } else if (user.role === 'doctor') {
+    const doctor = await Doctor.findOne({ user: user._id });
+    if (doctor) {
+      const allowedDoctorFields = [
+        'specialization', 'qualification', 'experience', 'department', 
+        'consultationFee', 'availableDays', 'availableFrom', 'availableTo', 
+        'maxPatientsPerDay', 'isActive'
+      ];
+      
+      for (const key of allowedDoctorFields) {
+        if (profile[key] !== undefined || req.body[key] !== undefined) {
+          doctor[key] = profile[key] ?? req.body[key];
+        }
+      }
+      doctor.fullName = user.fullName;
+      doctor.phone = user.phone;
+      doctor.email = user.email;
+      await doctor.save();
+    }
+  }
+
+  res.status(200).json({ 
+    success: true, 
+    message: 'User and profile updated successfully', 
+    data: user 
+  });
 });
 
 export const deleteUser = asyncHandler(async (req, res) => {

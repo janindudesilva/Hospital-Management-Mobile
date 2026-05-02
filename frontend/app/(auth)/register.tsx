@@ -26,6 +26,11 @@ export default function RegisterScreen() {
   const PHONE_REGEX = /^\d{10}$/;
   const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$/;
 
+  const setPhoneDigits = (raw: string) => {
+    const digits = raw.replace(/\D/g, '').slice(0, 10);
+    setForm((f) => ({ ...f, phone: digits }));
+  };
+
   useEffect(() => {
     const fetchDepartments = async () => {
       try {
@@ -125,6 +130,20 @@ export default function RegisterScreen() {
         Alert.alert('Validation', 'Department is required for doctor registration.');
         return;
       }
+      if (!form.qualification.trim()) {
+        Alert.alert('Validation', 'Qualification is required for doctor registration.');
+        return;
+      }
+      const expYears = String(form.experienceYears).trim();
+      if (!expYears) {
+        Alert.alert('Validation', 'Years of experience is required for doctor registration.');
+        return;
+      }
+      const feeNum = Number(form.consultationFee);
+      if (form.consultationFee.trim() === '' || Number.isNaN(feeNum) || feeNum < 0) {
+        Alert.alert('Validation', 'Please enter a valid consultation fee (0 or greater).');
+        return;
+      }
     }
 
     try {
@@ -151,8 +170,9 @@ export default function RegisterScreen() {
         payload.department = form.department.trim();
         payload.specialization = form.specialization.trim();
         payload.qualification = form.qualification.trim();
-        payload.experienceYears = form.experienceYears;
-        payload.consultationFee = form.consultationFee;
+        // API expects `experience` (not experienceYears) — see backend auth.routes
+        payload.experience = String(form.experienceYears).trim();
+        payload.consultationFee = Number(form.consultationFee);
       }
 
       const response = await authApi.register(payload);
@@ -220,10 +240,11 @@ export default function RegisterScreen() {
         />
         <Input 
           icon="call-outline" 
-          placeholder="Phone Number" 
+          placeholder="Phone Number (10 digits)" 
           value={form.phone} 
-          onChangeText={(val: string) => setForm({ ...form, phone: val })} 
+          onChangeText={setPhoneDigits} 
           keyboardType="phone-pad"
+          maxLength={10}
         />
 
         {form.role === 'patient' && (

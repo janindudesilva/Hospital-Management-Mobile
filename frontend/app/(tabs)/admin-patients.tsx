@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View, TextInput, Alert, Modal } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View, TextInput, Alert, Modal, ScrollView } from 'react-native';
 import { api } from '../../services/api';
 import { Theme } from '../../constants/Theme';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,7 +10,15 @@ export default function AdminPatients() {
   const [search, setSearch] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState({ fullName: '', email: '', phone: '', password: 'Password123!' });
+  const [form, setForm] = useState({ 
+    fullName: '', email: '', phone: '', password: '', 
+    dateOfBirth: '', gender: 'male', address: '' 
+  });
+
+  const setPhoneDigits = (raw: string) => {
+    const digits = raw.replace(/\D/g, '').slice(0, 10);
+    setForm((f) => ({ ...f, phone: digits }));
+  };
 
   const fetchPatients = async () => {
     try {
@@ -30,18 +38,64 @@ export default function AdminPatients() {
   }, []);
 
   const handleSavePatient = async () => {
-    if (!form.fullName || !form.email) return Alert.alert('Error', 'Name and email required');
+    // Basic validations
+    if (!form.fullName.trim()) return Alert.alert('Validation Error', 'Full name is required');
+    if (!form.email.trim() || !/^\S+@\S+\.\S+$/.test(form.email)) return Alert.alert('Validation Error', 'Valid email is required');
+    if (!form.phone.trim() || !/^\d{10}$/.test(form.phone)) return Alert.alert('Validation Error', 'Phone number must be exactly 10 digits');
+    if (!form.dateOfBirth.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(form.dateOfBirth)) {
+      return Alert.alert('Validation Error', 'Date of birth is required in YYYY-MM-DD format');
+    }
+    
+    const dob = new Date(form.dateOfBirth);
+    if (isNaN(dob.getTime()) || dob >= new Date()) {
+      return Alert.alert('Validation Error', 'Date of birth must be a valid past date');
+    }
+
+    if (!form.address.trim()) return Alert.alert('Validation Error', 'Address is required');
+
+    const strongPassword = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$/;
+    if (!editingId) {
+      if (!form.password.trim()) return Alert.alert('Validation Error', 'Password is required');
+      if (!strongPassword.test(form.password)) {
+        return Alert.alert(
+          'Validation Error',
+          'Password must be at least 8 characters and include uppercase, lowercase, a number, and a special character'
+        );
+      }
+    }
+
     try {
       if (editingId) {
-        await api.put(`/users/${editingId}`, form);
+        await api.put(`/users/${editingId}`, {
+          fullName: form.fullName.trim(),
+          email: form.email.trim(),
+          phone: form.phone.trim(),
+          profile: {
+            dateOfBirth: form.dateOfBirth,
+            gender: form.gender,
+            address: form.address.trim(),
+          },
+        });
         Alert.alert('Success', 'Patient record updated successfully');
       } else {
-        await api.post('/auth/register', { ...form, role: 'patient' });
-        Alert.alert('Success', 'Patient registered. Default password is: Password123!');
+        await api.post('/auth/register', {
+          fullName: form.fullName.trim(),
+          email: form.email.trim().toLowerCase(),
+          phone: form.phone.trim(),
+          password: form.password,
+          role: 'patient',
+          dateOfBirth: form.dateOfBirth,
+          gender: form.gender,
+          address: form.address.trim(),
+        });
+        Alert.alert('Success', 'Patient registered successfully');
       }
       setModalVisible(false);
       setEditingId(null);
-      setForm({ fullName: '', email: '', phone: '', password: 'Password123!' });
+      setForm({ 
+        fullName: '', email: '', phone: '', password: '', 
+        dateOfBirth: '', gender: 'male', address: '' 
+      });
       fetchPatients();
     } catch (error: any) {
       Alert.alert('Error', error.response?.data?.message || 'Failed to save patient');
@@ -52,8 +106,11 @@ export default function AdminPatients() {
     setForm({
       fullName: item.fullName,
       email: item.email || '',
-      phone: item.phone || '',
-      password: 'Password123!'
+      phone: String(item.phone || '').replace(/\D/g, '').slice(0, 10),
+      password: '',
+      dateOfBirth: item.dateOfBirth ? new Date(item.dateOfBirth).toISOString().split('T')[0] : '',
+      gender: ['male', 'female', 'other'].includes(item.gender) ? item.gender : 'male',
+      address: item.address || '',
     });
     setEditingId(item._id);
     setModalVisible(true);
@@ -98,7 +155,14 @@ export default function AdminPatients() {
             onChangeText={setSearch}
           />
         </View>
-        <Pressable style={styles.addButton} onPress={() => setModalVisible(true)}>
+        <Pressable style={styles.addButton} onPress={() => {
+          setEditingId(null);
+          setForm({ 
+            fullName: '', email: '', phone: '', password: '', 
+            dateOfBirth: '', gender: 'male', address: '' 
+          });
+          setModalVisible(true);
+        }}>
           <Ionicons name="add" size={24} color="#fff" />
         </Pressable>
       </View>
@@ -136,29 +200,71 @@ export default function AdminPatients() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>{editingId ? 'Edit Patient' : 'Add New Patient'}</Text>
-            <TextInput 
-              style={styles.input} 
-              placeholder="Full Name" 
-              value={form.fullName}
-              onChangeText={(v) => setForm({...form, fullName: v})}
-            />
-            {!editingId && (
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               <TextInput 
                 style={styles.input} 
-                placeholder="Email" 
-                keyboardType="email-address"
-                autoCapitalize="none"
-                value={form.email}
-                onChangeText={(v) => setForm({...form, email: v})}
+                placeholder="Full Name" 
+                value={form.fullName}
+                onChangeText={(v) => setForm({...form, fullName: v})}
               />
-            )}
-            <TextInput 
-              style={styles.input} 
-              placeholder="Phone" 
-              keyboardType="phone-pad"
-              value={form.phone}
-              onChangeText={(v) => setForm({...form, phone: v})}
-            />
+              {!editingId && (
+                <>
+                  <TextInput 
+                    style={styles.input} 
+                    placeholder="Email" 
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    value={form.email}
+                    onChangeText={(v) => setForm({...form, email: v})}
+                  />
+                  <TextInput 
+                    style={styles.input} 
+                    placeholder="Password (8+ chars, upper, lower, number, symbol)"
+                    secureTextEntry
+                    value={form.password}
+                    onChangeText={(v) => setForm({...form, password: v})}
+                  />
+                </>
+              )}
+              <TextInput 
+                style={styles.input} 
+                placeholder="Phone (10 digits)" 
+                keyboardType="phone-pad"
+                value={form.phone}
+                onChangeText={setPhoneDigits}
+                maxLength={10}
+              />
+              <TextInput 
+                style={styles.input} 
+                placeholder="Date of Birth (YYYY-MM-DD)" 
+                value={form.dateOfBirth}
+                onChangeText={(v) => setForm({...form, dateOfBirth: v})}
+              />
+              <View style={styles.genderContainer}>
+                <Text style={styles.label}>Gender:</Text>
+                <View style={styles.genderButtons}>
+                  {['male', 'female', 'other'].map((g) => (
+                    <Pressable 
+                      key={g} 
+                      style={[styles.genderBtn, form.gender === g && styles.genderBtnActive]}
+                      onPress={() => setForm({...form, gender: g})}
+                    >
+                      <Text style={[styles.genderBtnText, form.gender === g && styles.genderBtnTextActive]}>
+                        {g.charAt(0).toUpperCase() + g.slice(1)}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+              <TextInput 
+                style={[styles.input, { height: 100 }]} 
+                placeholder="Address" 
+                multiline
+                numberOfLines={3}
+                value={form.address}
+                onChangeText={(v) => setForm({...form, address: v})}
+              />
+            </ScrollView>
             <View style={styles.modalActions}>
               <Pressable style={styles.cancelBtn} onPress={() => setModalVisible(false)}>
                 <Text style={styles.cancelText}>Cancel</Text>
@@ -204,9 +310,16 @@ const styles = StyleSheet.create({
   empty: { textAlign: 'center', marginTop: 40, color: Theme.colors.textMuted, fontSize: 16 },
   
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
-  modalContent: { backgroundColor: '#fff', borderRadius: 24, padding: 24 },
+  modalContent: { backgroundColor: '#fff', borderRadius: 24, padding: 24, maxHeight: '80%' },
   modalTitle: { fontSize: 20, fontWeight: '800', marginBottom: 20, color: Theme.colors.text },
   input: { backgroundColor: Theme.colors.background, padding: 16, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: Theme.colors.border },
+  label: { fontSize: 14, fontWeight: '600', color: Theme.colors.text, marginBottom: 8 },
+  genderContainer: { marginBottom: 16 },
+  genderButtons: { flexDirection: 'row', gap: 8 },
+  genderBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: Theme.colors.border, alignItems: 'center', backgroundColor: '#fff' },
+  genderBtnActive: { backgroundColor: Theme.colors.primary, borderColor: Theme.colors.primary },
+  genderBtnText: { fontSize: 13, fontWeight: '600', color: Theme.colors.textMuted },
+  genderBtnTextActive: { color: '#fff' },
   modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12, marginTop: 12 },
   cancelBtn: { padding: 12, paddingHorizontal: 20 },
   cancelText: { color: Theme.colors.textMuted, fontWeight: '600' },

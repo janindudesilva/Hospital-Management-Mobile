@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View, TextInput, Alert, Modal, ScrollView } from 'react-native';
+import { Picker } from '@react-native-picker/picker';
 import { api } from '../../services/api';
 import { Theme } from '../../constants/Theme';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,9 +12,24 @@ export default function AdminDoctors() {
   const [modalVisible, setModalVisible] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({ 
-    fullName: '', email: '', phone: '', password: 'Password123!', 
-    specialization: '', department: '', experience: '', fee: '' 
+    fullName: '', email: '', phone: '', password: '', 
+    specialization: '', department: '', experience: '', fee: '', qualification: '' 
   });
+  const [departments, setDepartments] = useState<{ _id: string; name: string }[]>([]);
+  const [deptLoading, setDeptLoading] = useState(false);
+
+  const departmentPickerItems = useMemo(() => {
+    const list = [...departments];
+    if (form.department && !list.some((d) => d.name === form.department)) {
+      list.push({ _id: '_current', name: form.department });
+    }
+    return list;
+  }, [departments, form.department]);
+
+  const setPhoneDigits = (raw: string) => {
+    const digits = raw.replace(/\D/g, '').slice(0, 10);
+    setForm((f) => ({ ...f, phone: digits }));
+  };
 
   const fetchDoctors = async () => {
     try {
@@ -30,22 +46,76 @@ export default function AdminDoctors() {
     fetchDoctors();
   }, []);
 
+  useEffect(() => {
+    const loadDepartments = async () => {
+      try {
+        setDeptLoading(true);
+        const res = await api.get('/departments');
+        setDepartments(res.data.data || []);
+      } catch {
+        setDepartments([]);
+      } finally {
+        setDeptLoading(false);
+      }
+    };
+    loadDepartments();
+  }, []);
+
   const handleSaveDoctor = async () => {
-    if (!form.fullName || !form.email || !form.department) return Alert.alert('Error', 'Name, email, and department are required');
+    // Basic validations
+    if (!form.fullName.trim()) return Alert.alert('Validation Error', 'Full name is required');
+    if (!form.email.trim() || !/^\S+@\S+\.\S+$/.test(form.email)) return Alert.alert('Validation Error', 'Valid email is required');
+    if (!form.phone.trim() || !/^\d{10}$/.test(form.phone)) return Alert.alert('Validation Error', 'Phone number must be exactly 10 digits');
+    if (!form.department.trim()) return Alert.alert('Validation Error', 'Department is required');
+    if (!form.specialization.trim()) return Alert.alert('Validation Error', 'Specialization is required');
+    if (!form.qualification.trim()) return Alert.alert('Validation Error', 'Qualification is required');
+    if (!form.experience || isNaN(Number(form.experience))) return Alert.alert('Validation Error', 'Valid experience (years) is required');
+    if (!form.fee || isNaN(Number(form.fee))) return Alert.alert('Validation Error', 'Valid consultation fee is required');
+
+    const strongPassword = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$/;
+    if (!editingId) {
+      if (!form.password.trim()) return Alert.alert('Validation Error', 'Password is required');
+      if (!strongPassword.test(form.password)) {
+        return Alert.alert(
+          'Validation Error',
+          'Password must be at least 8 characters and include uppercase, lowercase, a number, and a special character'
+        );
+      }
+    }
+
     try {
       if (editingId) {
-        await api.put(`/doctors/${editingId}`, form);
+        await api.put(`/doctors/${editingId}`, {
+          fullName: form.fullName.trim(),
+          phone: form.phone.trim(),
+          specialization: form.specialization.trim(),
+          department: form.department.trim(),
+          qualification: form.qualification.trim(),
+          experience: String(form.experience).trim(),
+          consultationFee: Number(form.fee),
+        });
         Alert.alert('Success', 'Doctor details updated successfully');
       } else {
-        // Create user first
-        await api.post('/auth/register', { 
-          fullName: form.fullName, email: form.email, phone: form.phone, password: form.password, role: 'doctor' 
+        await api.post('/auth/register', {
+          fullName: form.fullName.trim(),
+          email: form.email.trim().toLowerCase(),
+          phone: form.phone.trim(),
+          password: form.password,
+          role: 'doctor',
+          specialization: form.specialization.trim(),
+          department: form.department.trim(),
+          qualification: form.qualification.trim(),
+          experience: String(form.experience).trim(),
+          consultationFee: Number(form.fee),
         });
-        Alert.alert('Success', 'Doctor registered. Default password is: Password123!');
+        Alert.alert('Success', 'Doctor registered successfully');
       }
       setModalVisible(false);
       setEditingId(null);
-      setForm({ fullName: '', email: '', phone: '', password: 'Password123!', specialization: '', department: '', experience: '', fee: '' });
+      setForm({ 
+        fullName: '', email: '', phone: '', password: '', 
+        specialization: '', department: '', experience: '', fee: '', qualification: '' 
+      });
       fetchDoctors();
     } catch (error: any) {
       Alert.alert('Error', error.response?.data?.message || 'Failed to save doctor');
@@ -56,12 +126,13 @@ export default function AdminDoctors() {
     setForm({
       fullName: item.fullName,
       email: item.email || '',
-      phone: item.phone || '',
-      password: 'Password123!',
+      phone: String(item.phone || '').replace(/\D/g, '').slice(0, 10),
+      password: '',
       specialization: item.specialization,
       department: item.department,
-      experience: item.experience?.toString() || '',
-      fee: item.consultationFee?.toString() || ''
+      experience: item.experience != null ? String(item.experience) : '',
+      fee: item.consultationFee != null ? String(item.consultationFee) : '',
+      qualification: item.qualification || ''
     });
     setEditingId(item._id);
     setModalVisible(true);
@@ -108,7 +179,14 @@ export default function AdminDoctors() {
             onChangeText={setSearch}
           />
         </View>
-        <Pressable style={styles.addButton} onPress={() => setModalVisible(true)}>
+        <Pressable style={styles.addButton} onPress={() => {
+          setEditingId(null);
+          setForm({ 
+            fullName: '', email: '', phone: '', password: '', 
+            specialization: '', department: '', experience: '', fee: '', qualification: '' 
+          });
+          setModalVisible(true);
+        }}>
           <Ionicons name="add" size={24} color="#fff" />
         </Pressable>
       </View>
@@ -151,13 +229,43 @@ export default function AdminDoctors() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>{editingId ? 'Edit Doctor Info' : 'Add New Doctor'}</Text>
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               <TextInput style={styles.input} placeholder="Full Name" value={form.fullName} onChangeText={(v) => setForm({...form, fullName: v})} />
               {!editingId && (
-                <TextInput style={styles.input} placeholder="Email" keyboardType="email-address" autoCapitalize="none" value={form.email} onChangeText={(v) => setForm({...form, email: v})} />
+                <>
+                  <TextInput style={styles.input} placeholder="Email" keyboardType="email-address" autoCapitalize="none" value={form.email} onChangeText={(v) => setForm({...form, email: v})} />
+                  <TextInput style={styles.input} placeholder="Password (8+ chars, upper, lower, number, symbol)" secureTextEntry value={form.password} onChangeText={(v) => setForm({...form, password: v})} />
+                </>
               )}
-              <TextInput style={styles.input} placeholder="Department (e.g., Cardiology)" value={form.department} onChangeText={(v) => setForm({...form, department: v})} />
+              <TextInput
+                style={styles.input}
+                placeholder="Phone Number (10 digits)"
+                keyboardType="phone-pad"
+                value={form.phone}
+                onChangeText={setPhoneDigits}
+                maxLength={10}
+              />
+              <View style={styles.pickerWrap}>
+                <Ionicons name="business-outline" size={20} color={Theme.colors.textMuted} style={styles.pickerIcon} />
+                {deptLoading ? (
+                  <ActivityIndicator size="small" color={Theme.colors.primary} style={styles.pickerLoading} />
+                ) : (
+                  <View style={styles.pickerInner}>
+                    <Picker
+                      selectedValue={form.department}
+                      onValueChange={(val) => setForm((f) => ({ ...f, department: val }))}
+                      style={styles.picker}
+                    >
+                      <Picker.Item label="Select Department" value="" color={Theme.colors.textMuted} />
+                      {departmentPickerItems.map((dept) => (
+                        <Picker.Item key={dept._id} label={dept.name} value={dept.name} />
+                      ))}
+                    </Picker>
+                  </View>
+                )}
+              </View>
               <TextInput style={styles.input} placeholder="Specialization" value={form.specialization} onChangeText={(v) => setForm({...form, specialization: v})} />
+              <TextInput style={styles.input} placeholder="Qualification (e.g., MBBS, MD)" value={form.qualification} onChangeText={(v) => setForm({...form, qualification: v})} />
               <TextInput style={styles.input} placeholder="Experience (Years)" keyboardType="numeric" value={form.experience} onChangeText={(v) => setForm({...form, experience: v})} />
               <TextInput style={styles.input} placeholder="Consultation Fee" keyboardType="numeric" value={form.fee} onChangeText={(v) => setForm({...form, fee: v})} />
             </ScrollView>
@@ -224,6 +332,21 @@ const styles = StyleSheet.create({
   modalContent: { backgroundColor: '#fff', borderRadius: 24, padding: 24, maxHeight: '80%' },
   modalTitle: { fontSize: 20, fontWeight: '800', marginBottom: 20, color: Theme.colors.text },
   input: { backgroundColor: Theme.colors.background, padding: 16, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: Theme.colors.border },
+  pickerWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Theme.colors.background,
+    borderRadius: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: Theme.colors.border,
+    paddingLeft: 12,
+    minHeight: 52,
+  },
+  pickerIcon: { marginRight: 4 },
+  pickerInner: { flex: 1, justifyContent: 'center' },
+  picker: { marginLeft: -8, color: Theme.colors.text },
+  pickerLoading: { flex: 1, paddingVertical: 16 },
   modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12, marginTop: 12 },
   cancelBtn: { padding: 12, paddingHorizontal: 20 },
   cancelText: { color: Theme.colors.textMuted, fontWeight: '600' },
