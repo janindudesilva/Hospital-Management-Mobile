@@ -1,0 +1,16 @@
+{
+  "expo": {
+    "name": "HMS Mobile",
+    "slug": "hms-mobile",
+    "scheme": "hmsmobile",
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-secure-store",
+      "@react-native-community/datetimepicker"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
